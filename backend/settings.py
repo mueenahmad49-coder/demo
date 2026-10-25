@@ -11,9 +11,12 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 from pathlib import Path
+import os
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
@@ -23,9 +26,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-+m@g59o2kdh-zhys)4s*cs6hy&fg@+n2wjlx7dxz12rd=f^qas'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'true').lower() == 'true'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost,testserver').split(',')
 
 
 # Application definition
@@ -41,9 +44,11 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'proctor',
+    'ai_proctor',
 ]
 
 MIDDLEWARE = [
+    'ai_proctor.middleware.AIUploadLimitMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -80,7 +85,7 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': os.getenv('DJANGO_DB_PATH', str(BASE_DIR / 'runtime.sqlite3')),
     }
 }
 
@@ -131,3 +136,17 @@ MAILERS = {
     },
 }
 CORS_ALLOW_ALL_ORIGINS = True
+
+# Additive local integration settings. Existing API behavior is retained.
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', SECRET_KEY)
+AI_ENABLED = os.getenv('AI_ENABLED', 'true').lower() == 'true'
+AI_MINIFAS_ACKNOWLEDGED = os.getenv('AI_MINIFAS_LICENSE_ACKNOWLEDGED', 'false').lower() == 'true'
+AI_REFERENCE_DIR = BASE_DIR / 'private_data' / 'references'
+AI_REVERIFY_SECONDS = max(15, int(os.getenv('AI_REVERIFY_SECONDS', '300')))
+AI_CLOUD_MAX_REQUESTS = max(1, int(os.getenv('AI_CLOUD_MAX_REQUESTS', '120')))
+AI_MAX_SESSIONS = 2
+ROBOFLOW_API_KEY = os.getenv('ROBOFLOW_API_KEY', '')
+ROBOFLOW_WORKSPACE = os.getenv('ROBOFLOW_WORKSPACE', 'my-workspace-vipow')
+ROBOFLOW_WORKFLOW = os.getenv('ROBOFLOW_WORKFLOW', 'yolo-world-small-demo')
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2 * 1024 * 1024

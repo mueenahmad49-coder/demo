@@ -1,0 +1,16 @@
+[
+  {
+    "model": "proctor.question",
+    "pk": 1,
+    "fields": {
+      "question_text": "what is youe name and what are you doing"
+    }
+  },
+  {
+    "model": "proctor.question",
+    "pk": 2,
+    "fields": {
+      "question_text": "tell about life"
+    }
+  }
+]

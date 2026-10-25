@@ -1,7 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import './App.css';
+import { useProctoring, API } from './ai/useProctoring';
+import { Preparation, StatusPanel, TeacherAIEvents } from './ai/Panels';
 
 function App() {
+  const [accessCode, setAccessCode] = useState('');
+  const [consent, setConsent] = useState(false);
+  const [cloudConsent, setCloudConsent] = useState(false);
+  const [headOnly, setHeadOnly] = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const [studentId, setStudentId] = useState("");
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdminView, setIsAdminView] = useState(false);
@@ -21,9 +28,16 @@ function App() {
 
   const videoRef = useRef(null);
   const examContainerRef = useRef(null);
+  const ai = useProctoring(videoRef);
+  const phoneWarnedRef = useRef(false);
+  const stopCameraChecks = ai.stop;
+
+  useEffect(() => {
+    if (examEnded || examSubmitted) void stopCameraChecks();
+  }, [examEnded, examSubmitted, stopCameraChecks]);
 
   const fetchAdminEvents = () => {
-    fetch('http://127.0.0.1:8000/api/proctor/events')
+    fetch(`${API}/api/proctor/events`)
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
@@ -52,7 +66,7 @@ function App() {
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const imageData = canvas.toDataURL('image/jpeg', 0.7); // Base64 compressed image
 
-      fetch('http://127.0.0.1:8000/api/proctor/save-snapshot', {
+      fetch(`${API}/api/proctor/save-snapshot`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -68,20 +82,9 @@ function App() {
   };
 
   useEffect(() => {
-    if (isLoggedIn) {
-      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        .then((stream) => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-          }
-          // Take initial snapshot after 2 seconds when webcam loads
-          setTimeout(() => {
-            captureAndSendSnapshot(studentId);
-          }, 2000);
-        })
-        .catch((err) => {
-          console.error("Webcam access error:", err);
-        });
+    if (isLoggedIn && !examEnded && !examSubmitted) {
+      // The pre-exam checks and legacy snapshots share the same browser stream.
+      const initialSnapshot = setTimeout(() => captureAndSendSnapshot(studentId), 2000);
 
       if (examContainerRef.current && examContainerRef.current.requestFullscreen) {
         examContainerRef.current.requestFullscreen().catch(err => {
@@ -89,7 +92,7 @@ function App() {
         });
       }
 
-      fetch('http://127.0.0.1:8000/api/proctor/questions')
+      fetch(`${API}/api/proctor/questions`)
         .then(res => res.json())
         .then(data => {
           if (Array.isArray(data) && data.length > 0) {
@@ -103,9 +106,58 @@ function App() {
         captureAndSendSnapshot(studentId);
       }, 60000);
 
-      return () => clearInterval(snapshotInterval);
+      return () => { clearInterval(snapshotInterval); clearTimeout(initialSnapshot); };
     }
-  }, [isLoggedIn, studentId]);
+  }, [isLoggedIn, studentId, examEnded, examSubmitted]);
+
+  // AI Phone Detection Warning Logic
+  useEffect(() => {
+    if (!isLoggedIn || examEnded || examSubmitted) return;
+
+    // AI state se phone ka count check karein
+    const phoneCount = ai.state?.objects?.counts?.['cell phone'] || 0;
+
+    if (ai.state?.frame_fresh && phoneCount > 0) {
+      if (!phoneWarnedRef.current) {
+        phoneWarnedRef.current = true; // Spam rokne ke liye flag ON karein
+
+        const warningMsg = `Mobile phone detected at ${new Date().toLocaleTimeString()}`;
+
+        // Live Warning Logs mein add karein aur 3 par terminate karein
+        setWarnings(prev => {
+          const newWarnings = [warningMsg, ...prev];
+          if (newWarnings.length >= 3) {
+            setExamEnded(true);
+            setStatus("Exam Terminated & Disqualified!");
+            setShowPopup(false);
+          } else {
+            setLatestWarningMsg(warningMsg);
+            setShowPopup(true);
+            setStatus("Suspicious Activity Detected!");
+          }
+          return newWarnings;
+        });
+
+        // Backend server par violation event bhejein
+        fetch(`${API}/api/proctor/log-event`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            student_id: studentId || "Unknown_Student",
+            event_type: "Phone-Detected",
+            timestamp: new Date().toLocaleTimeString()
+          })
+        }).catch(err => console.error("Error logging AI event:", err));
+
+        // 15 seconds baad flag reset karein taake dobara phone aane par nayi warning lag sake
+        setTimeout(() => { 
+          phoneWarnedRef.current = false; 
+        }, 15000);
+      }
+    }
+  }, [ai.state, isLoggedIn, examEnded, examSubmitted, studentId]);
 
   useEffect(() => {
     if (!isLoggedIn || examEnded || examSubmitted) return;
@@ -130,7 +182,7 @@ function App() {
 
     const sendEventToBackend = async (eventType) => {
       try {
-        await fetch('http://127.0.0.1:8000/api/proctor/log-event', {
+        await fetch(`${API}/api/proctor/log-event`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -216,13 +268,18 @@ function App() {
     };
   }, [isLoggedIn, examEnded, examSubmitted, studentId]);
 
-  const handleStartExam = (e) => {
+  const handleStartExam = async (e) => {
     e.preventDefault();
     if (!studentId.trim()) {
       alert("Kripya apni Student ID ya Roll Number enter karein!");
       return;
     }
-    setIsLoggedIn(true);
+    if (!consent || !ai.capabilities) return;
+    const started = await ai.start({ studentId: studentId.trim(), accessCode, consent, cloudConsent, headOnly });
+    if (!started) return;
+    setAccessCode('');
+    if (ai.capabilities.enabled) setPreparing(true);
+    else setIsLoggedIn(true);
   };
 
   const handleAnswerChange = (e) => {
@@ -261,6 +318,7 @@ function App() {
           </div>
 
           <div style={{ backgroundColor: '#fff', padding: '25px', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+            <TeacherAIEvents />
             <h3 style={{ marginTop: 0, color: '#34495e', borderBottom: '2px solid #ecf0f1', paddingBottom: '10px' }}>Violation Logs ({adminEvents.length})</h3>
             {adminEvents.length === 0 ? (
               <p style={{ color: '#95a5a6', fontStyle: 'italic', textAlign: 'center', padding: '20px' }}>No violation logs recorded in database yet.</p>
@@ -290,6 +348,16 @@ function App() {
         </div>
       </div>
     );
+  }
+
+  if (preparing) {
+    return <Preparation ai={ai} headOnly={headOnly} setHeadOnly={setHeadOnly}
+      onCancel={async () => { await ai.stop(); setPreparing(false); }}
+      onBegin={async () => {
+        // Request fullscreen within the user gesture, before the network round trip.
+        document.documentElement.requestFullscreen?.().catch(() => {});
+        if (await ai.command('begin')) { setPreparing(false); setIsLoggedIn(true); }
+      }} />;
   }
 
   if (!isLoggedIn) {
@@ -331,7 +399,21 @@ function App() {
                 boxSizing: 'border-box'
               }}
             />
-            <button 
+            {ai.capabilities?.enabled && <label className="ai-login-field">Exam access code
+              <input type="password" autoComplete="off" value={accessCode} onChange={e => setAccessCode(e.target.value)} required />
+            </label>}
+            <label className="ai-login-field"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} required />
+              I agree to webcam processing and the existing initial and 60-second stored snapshots. AI analysis frames are processed by the exam server without being saved.
+            </label>
+            {ai.capabilities?.enabled && <label className="ai-login-field"><input type="checkbox" checked={cloudConsent}
+              disabled={!ai.capabilities.cloud_configured} onChange={e => setCloudConsent(e.target.checked)} />
+              I also agree to sampled frames being sent to Roboflow for phone, book and person detection.
+              {!ai.capabilities.cloud_configured && ' Object checks require operator configuration.'}
+            </label>}
+            {ai.error && <p role="alert" className="ai-error">{ai.error}</p>}
+            {ai.busy && <p role="status">Preparing camera and models…</p>}
+            <button
+              disabled={ai.busy || !ai.capabilities || !consent}
               type="submit"
               style={{
                 width: '100%',
@@ -345,7 +427,7 @@ function App() {
                 cursor: 'pointer',
                 marginBottom: '15px'
               }}>
-              Start Secure Exam
+              {ai.capabilities?.enabled ? 'Check camera before exam' : 'Start Secure Exam'}
             </button>
           </form>
 
@@ -640,6 +722,10 @@ function App() {
           textAlign: 'center'
         }}>
           <h3 style={{ color: '#2c3e50', marginTop: 0, marginBottom: '15px' }}>Proctoring Camera</h3>
+          {ai.capabilities?.enabled && <>
+            <StatusPanel ai={ai} compact />
+            <button className="ai-retry" onClick={() => ai.command('retry')}>Retry camera checks / recalibrate</button>
+          </>}
           <div style={{ 
             borderRadius: '8px', 
             overflow: 'hidden', 
@@ -647,7 +733,7 @@ function App() {
             boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)'
           }}>
             <video 
-              ref={videoRef} 
+              ref={node => ai.attachVideo(node)}
               autoPlay 
               playsInline 
               muted 
@@ -656,7 +742,7 @@ function App() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '12px' }}>
             <span style={{ height: '10px', width: '10px', backgroundColor: '#2ecc71', borderRadius: '50%', display: 'inline-block' }}></span>
-            <span style={{ fontSize: '13px', color: '#27ae60', fontWeight: '600' }}>Live AI Surveillance Active</span>
+            <span style={{ fontSize: '13px', color: '#27ae60', fontWeight: '600' }}>{ai.capabilities?.enabled ? (ai.state?.frame_fresh ? 'AI camera checks active' : 'AI camera checks unavailable') : 'Camera active'}</span>
           </div>
         </div>
       </div>

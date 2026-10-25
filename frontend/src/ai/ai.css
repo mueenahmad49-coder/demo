@@ -1,0 +1,17 @@
+.ai-panel { background: #fff; color: #23354a; border: 1px solid #d7e1ec; border-radius: 10px; padding: 18px; margin: 18px 0; text-align: left; }
+.ai-panel h3 { margin: 0 0 12px; }
+.ai-status { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px; }
+.ai-status dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
+.ai-note { font-size: 13px; color: #526375; }
+.ai-error { color: #9e4317; background: #fff5e5; padding: 10px; border-radius: 5px; }
+.ai-preparation { max-width: 780px; margin: 25px auto; padding: 24px; font-family: 'Segoe UI', sans-serif; }
+.ai-preparation video { width: 100%; max-height: 360px; background: #111; border-radius: 10px; }
+.ai-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+.ai-actions button { background: #245aa0; color: white; border: 0; padding: 12px; border-radius: 6px; cursor: pointer; }
+.ai-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.ai-retry { background: #245aa0; color: #fff; padding: 10px 12px; border: 0; border-radius: 6px; margin-bottom: 12px; cursor: pointer; }
+.ai-login-field { display: block; text-align: left; margin-bottom: 14px; font-size: 13px; line-height: 1.5; }
+.ai-login-field input[type=password] { box-sizing: border-box; width: 100%; padding: 12px; margin-top: 5px; border: 1px solid #bdc3c7; border-radius: 6px; }
+.ai-scroll { overflow-x: auto; }
+.ai-panel table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.ai-panel td, .ai-panel th { padding: 10px; border-bottom: 1px solid #ddd; text-align: left; }
